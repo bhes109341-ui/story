@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>碧華國小：深海數學課 (TTS版)</title>
+    <style>
+        :root {
+            --bg-color: #010101;
+            --text-color: #c0c0c0;
+            --highlight: #e60000; 
+            --item-color: #00e5ff;
+            --slime-color: #77ff44; 
+            --math-color: #ffcc00; 
+            --bad-end: #ff3333;
+            --good-end: #00ff80;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            font-family: "Microsoft JhengHei", "Heiti TC", sans-serif;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            overflow: hidden;
+            user-select: none;
+        }
+
+        /* TTS 控制面板樣式 */
+        #tts-controls {
+            position: absolute;
+            top: 70px;
+            right: 20px;
+            background: rgba(20, 30, 20, 0.9);
+            border: 1px solid #3cb371;
+            padding: 10px;
+            border-radius: 8px;
+            z-index: 100;
+            font-size: 0.8rem;
+            color: #3cb371;
+        }
+        .ctrl-group { margin-bottom: 5px; }
+        .ctrl-group label { display: block; margin-bottom: 2px; }
+        select, input { background: #000; color: #3cb371; border: 1px solid #3cb371; width: 100%; }
+
+        .slime-overlay {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: radial-gradient(circle at center, transparent 0%, #000 120%);
+            pointer-events: none;
+            z-index: 0;
+            opacity: 0.7;
+        }
+
+        #game-interface {
+            width: 100%;
+            max-width: 850px;
+            height: 90vh;
+            background: rgba(8, 12, 8, 0.98);
+            border: 1px solid #102010;
+            box-shadow: 0 0 70px rgba(0, 20, 0, 0.3);
+            position: relative;
+            z-index: 1;
+            display: flex;
+            flex-direction: column;
+            border-radius: 6px;
+        }
+
+        header {
+            padding: 18px 30px;
+            border-bottom: 1px solid #152515;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: #030603;
+        }
+
+        h1 { margin: 0; font-size: 1.4rem; color: #3cb371; letter-spacing: 2px; text-shadow: 0 0 6px #3cb371; }
+
+        #status-bar span { margin-left: 20px; font-size: 0.95rem; }
+
+        #content-area {
+            flex: 1;
+            padding: 45px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+        }
+
+        #story-text {
+            font-size: 1.18rem;
+            line-height: 2;
+            margin-bottom: 45px;
+            text-align: justify;
+            white-space: pre-wrap;
+        }
+
+        .highlight { color: var(--highlight); font-weight: bold; }
+        .item { color: var(--item-color); font-weight: bold; }
+        .slime-text { color: var(--slime-color); font-style: italic; }
+        .name-tag { background: #252525; color: #fff; padding: 3px 8px; border-radius: 4px; }
+
+        #choices-area { display: grid; gap: 14px; padding-bottom: 25px; }
+
+        button {
+            background: #101510;
+            color: #99a999;
+            border: 1px solid #203020;
+            padding: 18px;
+            font-size: 1.05rem;
+            cursor: pointer;
+            transition: 0.2s;
+        }
+
+        button:hover { background: #1a2a1a; color: #fff; border-color: #6eff88; }
+        
+        .pulse-red { animation: pulseRed 1s infinite; }
+        @keyframes pulseRed { 50% { box-shadow: inset 0 0 50px rgba(255,0,0,0.3); } }
+
+        .fade-in { animation: fadeIn 1s; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+    </style>
+</head>
+<body>
+    <div class="slime-overlay"></div>
+
+    <div id="tts-controls">
+        <div class="ctrl-group">
+            <label>語速 (Speed): <span id="rate-val">1.0</span></label>
+            <input type="range" id="rate" min="0.5" max="2" step="0.1" value="1.0">
+        </div>
+        <div class="ctrl-group">
+            <label>語音選擇:</label>
+            <select id="voice-select"></select>
+        </div>
+        <button id="stop-speech" style="padding:5px; font-size:0.7rem; width:100%;">停止語音</button>
+    </div>
+
+    <div id="game-interface">
+        <header>
+            <h1>碧華國小：深海數學課</h1>
+            <div id="status-bar">
+                <span id="sanity-display" style="color:#0f0">理智: 100%</span>
+                <span id="inventory-display">背包: 空</span>
+            </div>
+        </header>
+        <div id="content-area">
+            <div id="story-text" class="fade-in"></div>
+            <div id="choices-area"></div>
+        </div>
+    </div>
+
+    <script>
+        // === TTS 語音邏輯 ===
+        const synth = window.speechSynthesis;
+        let voices = [];
+        const voiceSelect = document.getElementById('voice-select');
+        const rateInput = document.getElementById('rate');
+        const rateVal = document.getElementById('rate-val');
+
+        function populateVoiceList() {
+            voices = synth.getVoices();
+            voiceSelect.innerHTML = '';
+            voices.forEach((voice, i) => {
+                if (voice.lang.includes('zh') || voice.lang.includes('en')) {
+                    const option = document.createElement('option');
+                    option.textContent = `${voice.name} (${voice.lang})`;
+                    option.value = i;
+                    voiceSelect.appendChild(option);
+                }
+            });
+        }
+
+        populateVoiceList();
+        if (speechSynthesis.onvoiceschanged !== undefined) {
+            speechSynthesis.onvoiceschanged = populateVoiceList;
+        }
+
+        function speak(text) {
+            synth.cancel(); // 先停止之前的語音
+            // 過濾掉 HTML 標籤
+            const cleanText = text.replace(/<[^>]*>?/gm, '');
+            const utterThis = new SpeechSynthesisUtterance(cleanText);
+            
+            utterThis.voice = voices[voiceSelect.value];
+            utterThis.rate = rateInput.value;
+            synth.speak(utterThis);
+        }
+
+        rateInput.oninput = () => { rateVal.innerText = rateInput.value; };
+        document.getElementById('stop-speech').onclick = () => synth.cancel();
+
+        // === 遊戲邏輯 (與原本邏輯相同，新增了 speak 調用) ===
+        const gameState = {
+            sanity: 100,
+            inventory: [],
+            flags: { metHong: false, metChen: false }
+        };
+
+        const mathProblems = {
+            "math_1": { question: "458 + 276 = ?", answer: "734", hint: "記得進位。", penalty: -15 }
+        };
+
+        const storyData = {
+            "start": {
+                text: "你的手機震動了一下。是失蹤三天的同學<span class='name-tag'>林祐宇</span>傳來的訊息：\n\n『救我...我在自然教室...洪顥尹瘋了...到處都是水...』\n\n你站在碧華國小廢棄的舊校舍前。空氣中沒有霉味，反而瀰漫著一股濃烈的<span class='slime-text'>海腥味</span>。\n地板上有一道濕漉漉的拖行痕跡，一路延伸進校內。",
+                choices: [
+                    { text: "跟隨水漬進入校舍", next: "hallway_1f" },
+                    { text: "打電話給林祐宇", next: "call_fail" }
+                ]
+            },
+            "call_fail": {
+                text: "電話通了。但話筒另一端傳來的不是人聲，而是無數氣泡破裂的聲響，以及某種軟體動物蠕動的黏膩聲。\n你掛斷電話，心裡發毛。",
+                choices: [ { text: "硬著頭皮進去", next: "hallway_1f" } ]
+            },
+            "hallway_1f": {
+                text: "【1F 穿堂】\n牆壁上長滿了藤壺和青苔。這裡明明是陸地，卻像是在深海沈船裡。\n公佈欄上貼著一張榮譽榜，名字依稀可見：<span class='name-tag'>洪顥尹</span>。\n\n旁邊寫著：『他把章魚養在身體裡...實驗失敗了。』",
+                choices: [
+                    { text: "前往 2F 自然教室", next: "hallway_2f" },
+                    { text: "調查 1F 廁所", next: "toilet_scene" }
+                ]
+            },
+            "toilet_scene": {
+                text: "【1F 男廁】\n積水淹過了腳踝。你看到一個穿著制服的人趴在洗手台上。\n那個人緩緩轉過頭，他的嘴裡塞滿了<span class='highlight'>章魚的觸手</span>。\n『咕嚕...咕嚕...』",
+                effect: (s) => updateSanity(-20),
+                choices: [ { text: "嚇得退回走廊", next: "hallway_1f" } ]
+            },
+            "hallway_2f": {
+                text: "【2F 走廊】\n越靠近自然教室，腥味越重。你在門口撿到了一張<span class='item'>【實驗室門卡】</span>。",
+                effect: (s) => addItem("實驗室門卡"),
+                choices: [
+                    { text: "進入自然教室 (最終決戰)", next: "science_room" },
+                    { text: "進入 603 教室 (陳克仲所在)", next: "classroom_603_entry" }
+                ]
+            },
+            "classroom_603_entry": {
+                text: "你走進 603，看見<span class='name-tag'>陳克仲</span>躺在地上抽搐。他拿著一張數學題...",
+                choices: [ { text: "靠近陳克仲", next: "chen_math_challenge" } ]
+            },
+            "chen_math_challenge": {
+                text: "陳克仲發出模糊聲音：『算對...就...放過我...』\n問題：458 + 276 = ?",
+                choices: [
+                    { text: "回答 734", type: "math", answerKey: "math_1", next: "chen_correct_answer_1" },
+                    { text: "回答 724", type: "math", answerKey: "math_1", next: "start" }
+                ]
+            },
+            "chen_correct_answer_1": {
+                text: "你答對了！陳克仲給了你<span class='item'>【頂樓鑰匙】</span>，然後斷了氣。",
+                effect: (s) => addItem("頂樓鑰匙"),
+                choices: [ { text: "趕快離開", next: "hallway_2f" } ]
+            },
+            "science_room": {
+                text: "【自然教室】\n<span class='name-tag highlight'>洪顥尹</span>已經變成了巨大的章魚怪物。觸手纏繞著<span class='name-tag'>林祐宇</span>。",
+                effect: (s) => { 
+                    updateSanity(-30);
+                    document.getElementById('game-interface').classList.add('pulse-red');
+                },
+                choices: [
+                    { text: "死拼到底", next: "ending_bad_consumed" }
+                ]
+            },
+            "ending_bad_consumed": {
+                text: "你被觸手吞噬了。壞結局：深海同化。",
+                choices: [ { text: "重新開始", next: "start" } ]
+            },
+            "ending_insanity": {
+                text: "你徹底瘋了。成為了深海的一部分。",
+                choices: [ { text: "重新開始", next: "start" } ]
+            }
+        };
+
+        const ui = {
+            text: document.getElementById('story-text'),
+            choices: document.getElementById('choices-area'),
+            sanity: document.getElementById('sanity-display'),
+            inventory: document.getElementById('inventory-display')
+        };
+
+        function updateSanity(amount) {
+            gameState.sanity += amount;
+            if (gameState.sanity < 0) gameState.sanity = 0;
+            ui.sanity.innerText = `理智: ${gameState.sanity}%`;
+            if (gameState.sanity <= 0) { renderNode('ending_insanity'); return true; }
+            return false;
+        }
+
+        function addItem(item) {
+            if (!gameState.inventory.includes(item)) {
+                gameState.inventory.push(item);
+                ui.inventory.innerText = `背包: ${gameState.inventory.join(', ')}`;
+            }
+        }
+
+        function renderNode(key) {
+            if (key === 'start') {
+                gameState.sanity = 100;
+                gameState.inventory = [];
+                ui.inventory.innerText = "背包: 空";
+                document.getElementById('game-interface').classList.remove('pulse-red');
+            }
+
+            const node = storyData[key];
+            if (node.effect && node.effect(gameState)) return;
+
+            ui.text.innerHTML = node.text;
+            
+            // --- 觸發 TTS ---
+            speak(node.text);
+
+            ui.choices.innerHTML = '';
+            node.choices.forEach(choice => {
+                const btn = document.createElement('button');
+                btn.innerHTML = choice.text;
+                btn.onclick = () => renderNode(choice.next);
+                ui.choices.appendChild(btn);
+            });
+        }
+
+        // 首次啟動
+        window.onload = () => {
+            renderNode('start');
+        };
+    </script>
+</body>
+</html>
